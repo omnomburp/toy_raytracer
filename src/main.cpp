@@ -3,8 +3,6 @@
 
 #include <limits>
 #include <cmath>
-#include <iostream>
-#include <fstream>
 #include <vector>
 #include "types.h"
 #include "shapes.h"
@@ -26,12 +24,9 @@ vec3f& hit, vec3f& n, Material& material) {
     return spheres_dist < 1000;
 }
 
-vec3f cast_ray(const vec3f& origin, const vec3f& direction, const std::vector<Sphere>& spheres) {
+vec3f cast_ray(const vec3f& origin, const vec3f& direction, const std::vector<Sphere>& spheres, const std::vector<Light>& lights) {
 	vec3f point, n;
     Material material;
-
-    std::vector<Light> lights;
-    lights.push_back(Light({0, 1., 1.}, 0.8));
 
     float diffuse_light_intensity = 0.;
 
@@ -47,7 +42,7 @@ vec3f cast_ray(const vec3f& origin, const vec3f& direction, const std::vector<Sp
     return material.diffuse_color * diffuse_light_intensity;
 }
 
-void render(const std::vector<Sphere>& spheres) {
+void render(const std::vector<Sphere>& spheres, std::vector<Light>& lights) {
     constexpr int width    = 1024;
     constexpr int height   = 768;
     constexpr int fov = PI/2;
@@ -62,7 +57,7 @@ void render(const std::vector<Sphere>& spheres) {
             float x = (2*(i + 0.5) / (float)width - 1) * screen_width;
             float y = -(2*(j + 0.5) / (float)height - 1) * /* world units*/(tan(fov/2.));
             vec3f dir = vec3f(x, y, -1).normalize();
-            framebuffer[i+j*width] = cast_ray(vec3f(0,0,0), dir, spheres);
+            framebuffer[i+j*width] = cast_ray(vec3f(0,0,0), dir, spheres, lights);
         }
     }
 
@@ -87,7 +82,10 @@ int main() {
     spheres.push_back(Sphere(vec3f( 1.5, -0.5, -18), 3, red_rubber));
     spheres.push_back(Sphere(vec3f( 7,    5,   -18), 4,      ivory));
 
-    render(spheres);
+    std::vector<Light> lights;
+    lights.push_back(Light(vec3f{-20., 20, 20.}, 1.5));
+
+    render(spheres, lights);
 
     return 0;
 }
