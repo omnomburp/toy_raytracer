@@ -1,3 +1,6 @@
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
+
 #include <limits>
 #include <cmath>
 #include <iostream>
@@ -27,11 +30,21 @@ vec3f cast_ray(const vec3f& origin, const vec3f& direction, const std::vector<Sp
 	vec3f point, n;
     Material material;
 
+    std::vector<Light> lights;
+    lights.push_back(Light({0, 1., 1.}, 0.8));
+
+    float diffuse_light_intensity = 0.;
+
     if (!scene_intersect(origin, direction, spheres, point, n, material)) {
         return vec3f(0.2, 0.7, 0.8);
     }
+    
+    for (size_t i = 0; i < lights.size(); ++i) {
+        vec3f light_dir = (lights[i].position - point).normalize();
+        diffuse_light_intensity += lights[i].intensity * std::max<float>(0., light_dir * n);
+    }
 
-    return material.diffuse_color;
+    return material.diffuse_color * diffuse_light_intensity;
 }
 
 void render(const std::vector<Sphere>& spheres) {
@@ -53,15 +66,15 @@ void render(const std::vector<Sphere>& spheres) {
         }
     }
 
-	std::ofstream ofs;
-	ofs.open(".\\out.ppm", std::ofstream::out | std::ofstream::binary);
-	ofs << "P6\n" << width << " " << height << "\n255\n";
-    for (size_t i = 0; i < height*width; ++i) {
-        for (size_t j = 0; j<3; j++) {
-            ofs << (char)(255 * std::max(0.f, std::min(1.f, framebuffer[i][j])));
-        }
+    std::vector<unsigned char> image(width * height * 3);
+
+    for (size_t i = 0; i < height * width; ++i) {
+        image[3*i + 0] = (unsigned char)(255 * std::max(0.f, std::min(1.f, framebuffer[i][0])));
+        image[3*i + 1] = (unsigned char)(255 * std::max(0.f, std::min(1.f, framebuffer[i][1])));
+        image[3*i + 2] = (unsigned char)(255 * std::max(0.f, std::min(1.f, framebuffer[i][2])));
     }
-    ofs.close();
+
+    stbi_write_png("out.png", width, height, 3, image.data(), width * 3);
 }
 
 int main() {

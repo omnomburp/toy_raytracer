@@ -93,3 +93,10 @@ std::ostream& operator<<(std::ostream& out, const vec<DIM,T>& v) {
     }
     return out ;
 }
+
+struct Light {
+    Light(const vec3f& p, const float& i) : position(p), intensity(i) {}
+
+    vec3f position;
+    float intensity;
+};
