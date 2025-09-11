@@ -2,11 +2,19 @@
 
 #include "types.h"
 
+struct Material {
+	Material(const vec3f& color) : diffuse_color(color) {}
+	Material() : diffuse_color() {}
+
+	vec3f diffuse_color;
+};
+
 struct Sphere {
 	vec3f center;
 	float radius;
+	Material material;
 
-	Sphere(const vec3f& c, const float& r) : center{c}, radius{r} {}
+	Sphere(const vec3f& c, const float& r, const Material& m) : center{c}, radius{r}, material{m} {}
 
 	bool ray_intersect(const vec3f& origin, const vec3f& direction, float& sphere_dist) const {
 		vec3f l = center - origin;
