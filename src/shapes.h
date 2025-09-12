@@ -3,10 +3,12 @@
 #include "types.h"
 
 struct Material {
-	Material(const vec3f& color) : diffuse_color(color) {}
-	Material() : diffuse_color() {}
+	Material(const vec2f& a ,const vec3f& color, const float spec) : diffuse_color(color), albedo(a), specular_exponent(spec) {}
+	Material() : albedo(1, 0), diffuse_color(), specular_exponent() {}
 
+	vec2f albedo;
 	vec3f diffuse_color;
+	float specular_exponent;
 };
 
 struct Sphere {

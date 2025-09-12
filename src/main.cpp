@@ -9,6 +9,10 @@
 
 #define PI 3.14159265358979323846
 
+vec3f reflect(const vec3f& I, const vec3f& N) {
+		return I - N*2.f*(I*N);
+}
+
 bool scene_intersect(const vec3f& origin, const vec3f& direction, const std::vector<Sphere>& spheres,
 vec3f& hit, vec3f& n, Material& material) {
     float spheres_dist = std::numeric_limits<float>::max();
@@ -28,7 +32,7 @@ vec3f cast_ray(const vec3f& origin, const vec3f& direction, const std::vector<Sp
 	vec3f point, n;
     Material material;
 
-    float diffuse_light_intensity = 0.;
+    float diffuse_light_intensity = 0., specular_light_intensity = 0.;
 
     if (!scene_intersect(origin, direction, spheres, point, n, material)) {
         return vec3f(0.2, 0.7, 0.8);
@@ -36,10 +40,21 @@ vec3f cast_ray(const vec3f& origin, const vec3f& direction, const std::vector<Sp
     
     for (size_t i = 0; i < lights.size(); ++i) {
         vec3f light_dir = (lights[i].position - point).normalize();
+        float light_distance = (lights[i].position - point).norm();
+
+        vec3f shadow_origin = light_dir * n < 0 ? point - n * 1e-3 : point + n * 1e-3; // check if the point lies in the shadow of lights[i] 
+        vec3f shadow_point, shadow_N;
+        Material tmp_material;
+
+        if (scene_intersect(shadow_origin, light_dir, spheres, shadow_point, shadow_N, tmp_material))
+            continue;
+
         diffuse_light_intensity += lights[i].intensity * std::max<float>(0., light_dir * n);
+        specular_light_intensity += powf(std::max(0.f, reflect(light_dir, n)* direction), material.specular_exponent)*lights[i].intensity;
     }
 
-    return material.diffuse_color * diffuse_light_intensity;
+    return material.diffuse_color * diffuse_light_intensity * material.albedo[0] + vec3f{1., 1., 1.}
+    * specular_light_intensity * material.albedo[1];
 }
 
 void render(const std::vector<Sphere>& spheres, std::vector<Light>& lights) {
@@ -64,6 +79,9 @@ void render(const std::vector<Sphere>& spheres, std::vector<Light>& lights) {
     std::vector<unsigned char> image(width * height * 3);
 
     for (size_t i = 0; i < height * width; ++i) {
+        vec3f &c = framebuffer[i];
+        float max = std::max(c[0], std::max(c[1], c[2]));
+        if (max > 1) c = c*(1./max);
         image[3*i + 0] = (unsigned char)(255 * std::max(0.f, std::min(1.f, framebuffer[i][0])));
         image[3*i + 1] = (unsigned char)(255 * std::max(0.f, std::min(1.f, framebuffer[i][1])));
         image[3*i + 2] = (unsigned char)(255 * std::max(0.f, std::min(1.f, framebuffer[i][2])));
@@ -73,8 +91,8 @@ void render(const std::vector<Sphere>& spheres, std::vector<Light>& lights) {
 }
 
 int main() {
-    Material      ivory(vec3f(0.4, 0.4, 0.3));
-    Material red_rubber(vec3f(0.3, 0.1, 0.1));
+    Material      ivory(vec2f(0.6, 0.3), vec3f(0.4, 0.4, 0.3), 50.);
+    Material red_rubber(vec2f(0.9, 0.1) ,vec3f(0.3, 0.1, 0.1), 10.);
 
     std::vector<Sphere> spheres;
     spheres.push_back(Sphere(vec3f(-3,    0,   -16), 2,      ivory));
@@ -84,6 +102,8 @@ int main() {
 
     std::vector<Light> lights;
     lights.push_back(Light(vec3f{-20., 20, 20.}, 1.5));
+    lights.push_back(Light(vec3f( 30, 50, -25), 1.8));
+    lights.push_back(Light(vec3f( 30, 20,  30), 1.7));
 
     render(spheres, lights);
 
