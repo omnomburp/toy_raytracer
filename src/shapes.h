@@ -2,11 +2,19 @@
 
 #include "types.h"
 
-struct Material {
-	Material(const vec2f& a ,const vec3f& color, const float spec) : diffuse_color(color), albedo(a), specular_exponent(spec) {}
-	Material() : albedo(1, 0), diffuse_color(), specular_exponent() {}
+struct Light {
+    Light(const vec3f& p, const float& i) : position(p), intensity(i) {}
 
-	vec2f albedo;
+    vec3f position;
+    float intensity;
+};
+
+struct Material {
+	Material(const float r ,const vec4f& a ,const vec3f& color, const float spec) : refractive_index(r), diffuse_color(color), albedo(a), specular_exponent(spec) {}
+	Material() : refractive_index(1), albedo(1, 0, 0, 0), diffuse_color(), specular_exponent() {}
+
+	float refractive_index;
+	vec4f albedo;
 	vec3f diffuse_color;
 	float specular_exponent;
 };

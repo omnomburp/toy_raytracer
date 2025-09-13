@@ -13,48 +13,91 @@ vec3f reflect(const vec3f& I, const vec3f& N) {
 		return I - N*2.f*(I*N);
 }
 
+vec3f refract(const vec3f& I, const vec3f& N, const float refractive_index) {
+    float cosi =  - std::max<float>(-1.f, std::min(1.f, I*N));
+    float etai = 1, etat = refractive_index;
+
+    vec3f n = N;
+
+    if (cosi < 0) {
+        cosi = -cosi;
+        std::swap(etai, etat);
+        n = -N;
+    }
+
+    float eta = etai / etat;
+    float k = 1 - eta * eta * (1 - cosi * cosi);
+
+    return k < 0 ? vec3f(0, 0, 0) : I * eta + n * (eta * cosi - sqrtf(k));
+}
+
 bool scene_intersect(const vec3f& origin, const vec3f& direction, const std::vector<Sphere>& spheres,
-vec3f& hit, vec3f& n, Material& material) {
+vec3f& hit, vec3f& N, Material& material) {
     float spheres_dist = std::numeric_limits<float>::max();
     for (size_t i = 0; i < spheres.size(); ++i) {
         float dist_i;
         if (spheres[i].ray_intersect(origin, direction, dist_i) && dist_i < spheres_dist) {
             spheres_dist = dist_i;
             hit = origin + direction*dist_i; // the ray that hit
-            n = (hit - spheres[i].center).normalize(); // surface normal
+            N = (hit - spheres[i].center).normalize(); // surface normal
             material = spheres[i].material;
         }
     }
-    return spheres_dist < 1000;
+    
+    float checkerboard_dist = std::numeric_limits<float>::max();
+
+    if (fabs(direction.y) > 1e-3) {
+        float d = -(origin.y + 4) / direction.y;
+        vec3f pt = origin + direction * d;
+            if (d>0 && fabs(pt.x)<10 && pt.z<-10 && pt.z>-30 && d<spheres_dist) {
+                checkerboard_dist = d;
+                hit = pt;
+                N = vec3f(0,1,0);
+                material.diffuse_color = (int(.5*hit.x+1000) + int(.5*hit.z)) & 1 ? vec3f(1,1,1) : vec3f(1, .7, .3);
+                material.diffuse_color = material.diffuse_color*.3;
+        }
+        
+    }
+    return std::min(spheres_dist, checkerboard_dist) < 1000;
 }
 
-vec3f cast_ray(const vec3f& origin, const vec3f& direction, const std::vector<Sphere>& spheres, const std::vector<Light>& lights) {
-	vec3f point, n;
+vec3f cast_ray(const vec3f& origin, const vec3f& direction, const std::vector<Sphere>& spheres, const std::vector<Light>& lights,
+ size_t depth = 0) {
+	vec3f point, N;
     Material material;
 
     float diffuse_light_intensity = 0., specular_light_intensity = 0.;
 
-    if (!scene_intersect(origin, direction, spheres, point, n, material)) {
+    if (depth > 4 || !scene_intersect(origin, direction, spheres, point, N, material)) {
         return vec3f(0.2, 0.7, 0.8);
     }
+
+    vec3f reflect_dir = reflect(direction, N).normalize();
+    vec3f refract_dir = refract(direction, N, material.refractive_index).normalize();
+    
+    vec3f reflect_orig = reflect_dir * N < 0 ? point - N * 1e-3 : point + N * 1e-3;
+    vec3f refract_orig = refract_dir * N < 0 ? point - N * 1e-3 : point + N * 1e-3;
+
+    vec3f reflect_color = cast_ray(reflect_orig, reflect_dir, spheres, lights, depth + 1);
+    vec3f refract_color = cast_ray(refract_orig, refract_dir, spheres, lights, depth + 1);
     
     for (size_t i = 0; i < lights.size(); ++i) {
         vec3f light_dir = (lights[i].position - point).normalize();
         float light_distance = (lights[i].position - point).norm();
 
-        vec3f shadow_origin = light_dir * n < 0 ? point - n * 1e-3 : point + n * 1e-3; // check if the point lies in the shadow of lights[i] 
+        vec3f shadow_origin = light_dir * N < 0 ? point - N * 1e-3 /* pointing in different directions*/: point + N * 1e-3; // check if the point lies in the shadow of lights[i] 
         vec3f shadow_point, shadow_N;
         Material tmp_material;
 
-        if (scene_intersect(shadow_origin, light_dir, spheres, shadow_point, shadow_N, tmp_material))
+        if (scene_intersect(shadow_origin, light_dir, spheres, shadow_point, shadow_N, tmp_material) && (shadow_point - shadow_origin).norm() < light_distance)
             continue;
 
-        diffuse_light_intensity += lights[i].intensity * std::max<float>(0., light_dir * n);
-        specular_light_intensity += powf(std::max(0.f, reflect(light_dir, n)* direction), material.specular_exponent)*lights[i].intensity;
+        diffuse_light_intensity += lights[i].intensity * std::max<float>(0., light_dir * N);
+        specular_light_intensity += powf(std::max(0.f, reflect(light_dir, N)* direction), material.specular_exponent)*lights[i].intensity;
     }
 
-    return material.diffuse_color * diffuse_light_intensity * material.albedo[0] + vec3f{1., 1., 1.}
-    * specular_light_intensity * material.albedo[1];
+    return material.diffuse_color * diffuse_light_intensity * material.albedo[0] + vec3f(1., 1., 1.)
+    * specular_light_intensity * material.albedo[1] + reflect_color*material.albedo[2] + refract_color*material.albedo[3];
 }
 
 void render(const std::vector<Sphere>& spheres, std::vector<Light>& lights) {
@@ -91,14 +134,16 @@ void render(const std::vector<Sphere>& spheres, std::vector<Light>& lights) {
 }
 
 int main() {
-    Material      ivory(vec2f(0.6, 0.3), vec3f(0.4, 0.4, 0.3), 50.);
-    Material red_rubber(vec2f(0.9, 0.1) ,vec3f(0.3, 0.1, 0.1), 10.);
+    Material      ivory(1.0, vec4f(0.6,  0.3, 0.1, 0.0), vec3f(0.4, 0.4, 0.3),   50.);
+    Material      glass(1.5, vec4f(0.0,  0.5, 0.1, 0.8), vec3f(0.6, 0.7, 0.8),  125.);
+    Material red_rubber(1.0, vec4f(0.9,  0.1, 0.0, 0.0), vec3f(0.3, 0.1, 0.1),   10.);
+    Material     mirror(1.0, vec4f(0.0, 10.0, 0.8, 0.0), vec3f(1.0, 1.0, 1.0), 1425.);
 
     std::vector<Sphere> spheres;
     spheres.push_back(Sphere(vec3f(-3,    0,   -16), 2,      ivory));
-    spheres.push_back(Sphere(vec3f(-1.0, -1.5, -12), 2, red_rubber));
+    spheres.push_back(Sphere(vec3f(-1.0, -1.5, -12), 2,      glass));
     spheres.push_back(Sphere(vec3f( 1.5, -0.5, -18), 3, red_rubber));
-    spheres.push_back(Sphere(vec3f( 7,    5,   -18), 4,      ivory));
+    spheres.push_back(Sphere(vec3f( 7,    5,   -18), 4,     mirror));
 
     std::vector<Light> lights;
     lights.push_back(Light(vec3f{-20., 20, 20.}, 1.5));
