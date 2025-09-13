@@ -1,5 +1,7 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 
 #include <limits>
 #include <cmath>
@@ -62,14 +64,14 @@ vec3f& hit, vec3f& N, Material& material) {
 }
 
 vec3f cast_ray(const vec3f& origin, const vec3f& direction, const std::vector<Sphere>& spheres, const std::vector<Light>& lights,
- size_t depth = 0) {
+ const vec3f& bg, size_t depth = 0) {
 	vec3f point, N;
     Material material;
 
     float diffuse_light_intensity = 0., specular_light_intensity = 0.;
 
     if (depth > 4 || !scene_intersect(origin, direction, spheres, point, N, material)) {
-        return vec3f(0.2, 0.7, 0.8);
+        return bg;
     }
 
     vec3f reflect_dir = reflect(direction, N).normalize();
@@ -78,8 +80,8 @@ vec3f cast_ray(const vec3f& origin, const vec3f& direction, const std::vector<Sp
     vec3f reflect_orig = reflect_dir * N < 0 ? point - N * 1e-3 : point + N * 1e-3;
     vec3f refract_orig = refract_dir * N < 0 ? point - N * 1e-3 : point + N * 1e-3;
 
-    vec3f reflect_color = cast_ray(reflect_orig, reflect_dir, spheres, lights, depth + 1);
-    vec3f refract_color = cast_ray(refract_orig, refract_dir, spheres, lights, depth + 1);
+    vec3f reflect_color = cast_ray(reflect_orig, reflect_dir, spheres, lights, bg, depth + 1);
+    vec3f refract_color = cast_ray(refract_orig, refract_dir, spheres, lights, bg, depth + 1);
     
     for (size_t i = 0; i < lights.size(); ++i) {
         vec3f light_dir = (lights[i].position - point).normalize();
@@ -104,7 +106,10 @@ void render(const std::vector<Sphere>& spheres, std::vector<Light>& lights) {
     constexpr int width    = 1024;
     constexpr int height   = 768;
     constexpr int fov = PI/2;
+    int env_width, env_height, channels;
     std::vector<vec3f> framebuffer(width*height);
+
+    float *data = stbi_loadf("envmap.jpg", &env_width, &env_height, &channels, 3);
 
 #pragma omp parallel for
     for (size_t j = 0; j<height; j++) {
@@ -114,10 +119,23 @@ void render(const std::vector<Sphere>& spheres, std::vector<Light>& lights) {
             float screen_width = tan(fov/2.) * aspect_ratio;
             float x = (2*(i + 0.5) / (float)width - 1) * screen_width;
             float y = -(2*(j + 0.5) / (float)height - 1) * /* world units*/(tan(fov/2.));
+                
             vec3f dir = vec3f(x, y, -1).normalize();
-            framebuffer[i+j*width] = cast_ray(vec3f(0,0,0), dir, spheres, lights);
+
+            float u = 0.5f + atan2(dir.z, dir.x) / (2 * PI);
+            float v = 0.5f - asin(dir.y) / PI;
+
+            int px = std::min(env_width - 1, std::max(0, int(u * env_width)));
+            int py = std::min(env_height - 1, std::max(0, int(v * env_height)));
+            int index = (py * env_width + px) * 3;
+            float r = data[index + 0];
+            float g = data[index + 1];
+            float b = data[index + 2];
+
+            framebuffer[i+j*width] = cast_ray(vec3f(0,0,0), dir, spheres, lights, vec3f(r, g, b));
         }
     }
+    stbi_image_free(data);
 
     std::vector<unsigned char> image(width * height * 3);
 
