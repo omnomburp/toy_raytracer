@@ -109,7 +109,7 @@ void render(const std::vector<Sphere>& spheres, std::vector<Light>& lights) {
     int env_width, env_height, channels;
     std::vector<vec3f> framebuffer(width*height);
 
-    float *data = stbi_loadf("envmap.jpg", &env_width, &env_height, &channels, 3);
+    auto* data = stbi_load("envmap.jpg", &env_width, &env_height, &channels, 0);
 
 #pragma omp parallel for
     for (size_t j = 0; j<height; j++) {
@@ -128,11 +128,12 @@ void render(const std::vector<Sphere>& spheres, std::vector<Light>& lights) {
             int px = std::min(env_width - 1, std::max(0, int(u * env_width)));
             int py = std::min(env_height - 1, std::max(0, int(v * env_height)));
             int index = (py * env_width + px) * 3;
+
             float r = data[index + 0];
             float g = data[index + 1];
             float b = data[index + 2];
 
-            framebuffer[i+j*width] = cast_ray(vec3f(0,0,0), dir, spheres, lights, vec3f(r, g, b));
+            framebuffer[i+j*width] = cast_ray(vec3f(0,0,0), dir, spheres, lights, vec3f(r, g, b) * (1/255.));
         }
     }
     stbi_image_free(data);
