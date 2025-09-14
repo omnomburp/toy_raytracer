@@ -8,6 +8,7 @@
 #include <vector>
 #include "types.h"
 #include "shapes.h"
+#include "model.h"
 
 #define PI 3.14159265358979323846
 
@@ -15,26 +16,16 @@ vec3f reflect(const vec3f& I, const vec3f& N) {
 		return I - N*2.f*(I*N);
 }
 
-vec3f refract(const vec3f& I, const vec3f& N, const float refractive_index) {
-    float cosi =  - std::max<float>(-1.f, std::min(1.f, I*N));
-    float etai = 1, etat = refractive_index;
-
-    vec3f n = N;
-
-    if (cosi < 0) {
-        cosi = -cosi;
-        std::swap(etai, etat);
-        n = -N;
-    }
-
-    float eta = etai / etat;
-    float k = 1 - eta * eta * (1 - cosi * cosi);
-
-    return k < 0 ? vec3f(0, 0, 0) : I * eta + n * (eta * cosi - sqrtf(k));
+vec3f refract(const vec3f &I, const vec3f &N, const float eta_t, const float eta_i=1.f) { // Snell's law
+    float cosi = - std::max(-1.f, std::min(1.f, I*N));
+    if (cosi<0) return refract(I, -N, eta_i, eta_t);
+    float eta = eta_i / eta_t;
+    float k = 1 - eta*eta*(1 - cosi*cosi);
+    return k<0 ? vec3f(1,0,0) : I*eta + N*(eta*cosi - sqrtf(k));
 }
 
 bool scene_intersect(const vec3f& origin, const vec3f& direction, const std::vector<Sphere>& spheres,
-vec3f& hit, vec3f& N, Material& material) {
+vec3f& hit, vec3f& N, Model& duck, Material& material) {
     float spheres_dist = std::numeric_limits<float>::max();
     for (size_t i = 0; i < spheres.size(); ++i) {
         float dist_i;
@@ -44,6 +35,31 @@ vec3f& hit, vec3f& N, Material& material) {
             N = (hit - spheres[i].center).normalize(); // surface normal
             material = spheres[i].material;
         }
+    }
+
+    float duck_best_t = std::numeric_limits<float>::max();
+    int   duck_best_f = -1;
+
+    for (int f = 0; f < duck.nfaces(); ++f) {
+        float t;
+        if (duck.ray_intersect(origin, direction, f, t) && t < duck_best_t) {
+            duck_best_t = t;
+            duck_best_f = f;
+        }
+    }
+
+    if (duck_best_f != -1 && duck_best_t < spheres_dist) {
+        spheres_dist = duck_best_t;
+        hit = origin + direction * duck_best_t;
+        
+        vec3f v0 = duck.vert(duck_best_f, 0);
+        vec3f v1 = duck.vert(duck_best_f, 1);
+        vec3f v2 = duck.vert(duck_best_f, 2);
+
+        vec3f duck_N = cross(v1 - v0, v2 - v0).normalize();
+        if (duck_N * direction > 0) duck_N = -duck_N;
+        N = duck_N;
+        material = duck.material;
     }
     
     float checkerboard_dist = std::numeric_limits<float>::max();
@@ -60,17 +76,17 @@ vec3f& hit, vec3f& N, Material& material) {
         }
         
     }
-    return std::min(spheres_dist, checkerboard_dist) < 1000;
+    return std::min(spheres_dist, std::min(checkerboard_dist, duck_best_t)) < 1000;
 }
 
-vec3f cast_ray(const vec3f& origin, const vec3f& direction, const std::vector<Sphere>& spheres, const std::vector<Light>& lights,
+vec3f cast_ray(const vec3f& origin, const vec3f& direction, const std::vector<Sphere>& spheres, const std::vector<Light>& lights, Model& duck,
  const vec3f& bg, size_t depth = 0) {
 	vec3f point, N;
     Material material;
 
     float diffuse_light_intensity = 0., specular_light_intensity = 0.;
 
-    if (depth > 4 || !scene_intersect(origin, direction, spheres, point, N, material)) {
+    if (depth > 4 || !scene_intersect(origin, direction, spheres, point, N, duck, material)) {
         return bg;
     }
 
@@ -80,8 +96,8 @@ vec3f cast_ray(const vec3f& origin, const vec3f& direction, const std::vector<Sp
     vec3f reflect_orig = reflect_dir * N < 0 ? point - N * 1e-3 : point + N * 1e-3;
     vec3f refract_orig = refract_dir * N < 0 ? point - N * 1e-3 : point + N * 1e-3;
 
-    vec3f reflect_color = cast_ray(reflect_orig, reflect_dir, spheres, lights, bg, depth + 1);
-    vec3f refract_color = cast_ray(refract_orig, refract_dir, spheres, lights, bg, depth + 1);
+    vec3f reflect_color = cast_ray(reflect_orig, reflect_dir, spheres, lights, duck, bg, depth + 1);
+    vec3f refract_color = cast_ray(refract_orig, refract_dir, spheres, lights, duck, bg, depth + 1);
     
     for (size_t i = 0; i < lights.size(); ++i) {
         vec3f light_dir = (lights[i].position - point).normalize();
@@ -91,7 +107,7 @@ vec3f cast_ray(const vec3f& origin, const vec3f& direction, const std::vector<Sp
         vec3f shadow_point, shadow_N;
         Material tmp_material;
 
-        if (scene_intersect(shadow_origin, light_dir, spheres, shadow_point, shadow_N, tmp_material) && (shadow_point - shadow_origin).norm() < light_distance)
+        if (scene_intersect(shadow_origin, light_dir, spheres, shadow_point, shadow_N, duck, tmp_material) && (shadow_point - shadow_origin).norm() < light_distance)
             continue;
 
         diffuse_light_intensity += lights[i].intensity * std::max<float>(0., light_dir * N);
@@ -102,10 +118,10 @@ vec3f cast_ray(const vec3f& origin, const vec3f& direction, const std::vector<Sp
     * specular_light_intensity * material.albedo[1] + reflect_color*material.albedo[2] + refract_color*material.albedo[3];
 }
 
-void render(const std::vector<Sphere>& spheres, std::vector<Light>& lights) {
+void render(const std::vector<Sphere>& spheres, std::vector<Light>& lights, Model& duck) {
     constexpr int width    = 1024;
     constexpr int height   = 768;
-    constexpr int fov = PI/2;
+    constexpr float fov = PI/3.;
     int env_width, env_height, channels;
     std::vector<vec3f> framebuffer(width*height);
 
@@ -133,7 +149,7 @@ void render(const std::vector<Sphere>& spheres, std::vector<Light>& lights) {
             float g = data[index + 1];
             float b = data[index + 2];
 
-            framebuffer[i+j*width] = cast_ray(vec3f(0,0,0), dir, spheres, lights, vec3f(r, g, b) * (1/255.));
+            framebuffer[i+j*width] = cast_ray(vec3f(0,0,0), dir, spheres, lights, duck, vec3f(r, g, b) * (1/255.));
         }
     }
     stbi_image_free(data);
@@ -169,7 +185,9 @@ int main() {
     lights.push_back(Light(vec3f( 30, 50, -25), 1.8));
     lights.push_back(Light(vec3f( 30, 20,  30), 1.7));
 
-    render(spheres, lights);
+    auto duck = Model("duck.obj", glass);
+
+    render(spheres, lights, duck);
 
     return 0;
 }
